@@ -12,13 +12,18 @@ import { getAuth }        from "https://www.gstatic.com/firebasejs/12.17.1/fireb
 import { getFirestore }   from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
 
 const firebaseConfig = {
-  apiKey:            "PASTE_YOUR_API_KEY",
-  authDomain:        "your-project.firebaseapp.com",
-  projectId:         "your-project-id",
-  storageBucket:     "your-project-id.appspot.com",
-  messagingSenderId: "PASTE_YOUR_SENDER_ID",
-  appId:             "PASTE_YOUR_APP_ID"
+  apiKey: "AIzaSyC2KDOdapXV9ByYM1WdHecJ1oLBuIBwGQY",
+  authDomain: "aa-webdev.firebaseapp.com",
+  projectId: "aa-webdev",
+  storageBucket: "aa-webdev.firebasestorage.app",
+  messagingSenderId: "760720815803",
+  appId: "1:760720815803:web:37bae8bff1900ea1a1db9e"
 };
+
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
 
 const app = initializeApp(firebaseConfig);
 
