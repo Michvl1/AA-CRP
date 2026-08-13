@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MS Web Development — Request Portal</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        canvas:  '#eceef1',
+        surface: '#ffffff',
+        inset:   '#f6f7f9',
+        line:    '#e3e6ea',
+        ink:     '#191c20',
+        inksoft: '#565c66',
+        inkfaint:'#8a909a',
+        pine:    '#14624f',
+        pinesoft:'#e7f0ec',
+        gold:    '#a06d15',
+        goldsoft:'#fbf1dd',
+        clay:    '#b23c2b',
+        claysoft:'#fbe9e6'
+      },
+      fontFamily: {
+        display: ['"Bricolage Grotesque"', 'sans-serif'],
+        sans:    ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono:    ['"JetBrains Mono"', 'ui-monospace', 'monospace']
+      },
+      borderColor: { DEFAULT: '#e3e6ea' }
+    }
+  }
+}
+</script>
+
+<style>
+  :root{
+    --canvas:#eceef1; --surface:#fff; --inset:#f6f7f9; --line:#e3e6ea;
+    --ink:#191c20; --ink-soft:#565c66; --ink-faint:#8a909a;
+    --pine:#14624f; --gold:#a06d15; --clay:#b23c2b;
+  }
+  *{ scrollbar-width:thin; scrollbar-color:#cdd2d8 transparent; }
+  body{
+    background:var(--canvas); color:var(--ink);
+    font-family:Inter, ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  }
+  .font-display{ font-family:"Bricolage Grotesque", sans-serif; letter-spacing:-.02em; }
+  .mono{ font-family:"JetBrains Mono", ui-mono, monospace; }
+  .eyebrow{ font-family:"JetBrains Mono", monospace; font-size:.68rem; letter-spacing:.14em; text-transform:uppercase; }
+
+  .page{ display:none; }
+  .page.active{ display:block; animation:rise .28s ease both; }
+  @keyframes rise{ from{ opacity:0; transform:translateY(8px);} to{ opacity:1; transform:none; } }
+
+  /* sidebar nav */
+  .nav-item{ position:relative; }
+  .nav-item .bar{ position:absolute; left:-.75rem; top:.55rem; bottom:.55rem; width:2px; border-radius:2px; background:transparent; transition:.15s; }
+  .nav-item.active{ color:var(--ink); background:var(--inset); }
+  .nav-item.active .bar{ background:var(--pine); }
+  .nav-item svg{ width:17px; height:17px; }
+
+  /* status pills — read as indicator dots, content-true */
+  .badge{ display:inline-flex; align-items:center; gap:.42em; padding:.18rem .58rem; border-radius:999px;
+    font-family:"JetBrains Mono", monospace; font-size:.7rem; font-weight:500; white-space:nowrap; }
+  .badge::before{ content:""; width:.44rem; height:.44rem; border-radius:999px; background:currentColor; }
+  .b-neutral{ background:#eef0f2; color:#525862; }
+  .b-faint{ background:#f2f3f5; color:#8a909a; }
+  .b-pine{ background:var(--pinesoft); color:var(--pine); }
+  .b-gold{ background:var(--goldsoft); color:var(--gold); }
+  .b-done{ background:#e8f1ec; color:#2f6b43; }
+  .b-clay{ background:var(--claysoft); color:var(--clay); }
+  .b-clay-solid{ background:var(--clay); color:#fff; }
+
+  /* the signature: attention rail on items needing a human decision */
+  .attn{ position:relative; }
+  .attn::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:3px;
+    background:linear-gradient(var(--gold), #d29a2a); border-top-left-radius:1rem; border-bottom-left-radius:1rem; }
+
+  /* pipeline connector */
+  .pipe{ position:relative; }
+  .pipe::after{ content:""; position:absolute; left:1.35rem; right:1.35rem; top:1.15rem; height:2px;
+    background:repeating-linear-gradient(90deg,#3a3f47 0 6px, transparent 6px 12px); }
+
+  .field{ background:var(--surface); border:1px solid var(--line); border-radius:.7rem;
+    padding:.7rem .85rem; font-size:.875rem; outline:none; transition:.15s; width:100%; }
+  .field:focus{ border-color:var(--pine); box-shadow:0 0 0 3px rgba(20,98,79,.12); }
+
+  .btn-ink{ background:var(--ink); color:#fff; }
+  .btn-ink:hover{ background:#000; }
+  .btn-pine{ background:var(--pine); color:#fff; }
+  .btn-pine:hover{ background:#0f4f40; }
+  .card{ background:var(--surface); border:1px solid var(--line); border-radius:1rem; }
+
+  .toast{ transform:translateY(140px); opacity:0; transition:transform .3s cubic-bezier(.2,.8,.2,1), opacity .3s; }
+  .toast.show{ transform:none; opacity:1; }
+
+  :focus-visible{ outline:2px solid var(--pine); outline-offset:2px; border-radius:4px; }
+  @media (prefers-reduced-motion:reduce){ *{ animation:none!important; transition:none!important; } }
+</style>
+</head>
+
+<body>
+
+<!-- Access gate: covers the app until Firebase confirms an admin is signed in -->
+<div id="authGate" class="fixed inset-0 z-[100] bg-canvas grid place-items-center">
+  <div class="flex items-center gap-3 text-inksoft mono text-sm">
+    <span class="w-4 h-4 border-2 border-inkfaint border-t-transparent rounded-full animate-spin"></span>
+    Checking access…
+  </div>
+</div>
+
+<div class="min-h-screen flex">
+
+  <!-- Sidebar -->
+  <aside class="w-64 bg-surface border-r border-line hidden lg:flex flex-col fixed inset-y-0">
+    <div class="px-6 py-6">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-ink text-white grid place-items-center mono text-sm font-semibold">ms</div>
+        <div class="leading-tight">
+          <div class="font-display font-bold">MS Web Development</div>
+          <div class="eyebrow text-inkfaint">Request portal</div>
+        </div>
+      </div>
+    </div>
+
+    <nav class="px-6 mt-2 space-y-1 text-sm font-medium text-inksoft">
+      <button onclick="showPage('dashboard')" data-page="dashboard" class="nav-item active w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-inset transition">
+        <span class="bar"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        Dashboard
+      </button>
+      <button onclick="showPage('requests')" data-page="requests" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-inset transition">
+        <span class="bar"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 5.5A1.5 1.5 0 0 1 4.5 4h15A1.5 1.5 0 0 1 21 5.5V15l-4 4H4.5A1.5 1.5 0 0 1 3 17.5z"/><path d="M8 9h8M8 13h5"/></svg>
+        Requests
+        <span class="ml-auto mono text-xs bg-inset text-inksoft rounded-full px-2 py-0.5">8</span>
+      </button>
+      <button onclick="showPage('clients')" data-page="clients" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-inset transition">
+        <span class="bar"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 5.2a3.2 3.2 0 0 1 0 5.9M17.5 20a5.5 5.5 0 0 0-2.5-4.6"/></svg>
+        Clients
+      </button>
+      <button onclick="showPage('analytics')" data-page="analytics" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-inset transition">
+        <span class="bar"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+        Analytics
+      </button>
+      <button onclick="showPage('ai')" data-page="ai" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-inset transition">
+        <span class="bar"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></svg>
+        AI queue
+        <span class="ml-auto mono text-xs bg-goldsoft text-gold rounded-full px-2 py-0.5">3</span>
+      </button>
+      <button onclick="showPage('activity')" data-page="activity" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-inset transition">
+        <span class="bar"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>
+        Activity
+      </button>
+    </nav>
+
+    <div class="mt-auto p-6">
+      <div class="rounded-xl border border-line bg-inset p-4">
+        <div class="eyebrow text-inkfaint">Automation readiness</div>
+        <div class="mt-2 flex items-end justify-between">
+          <div class="font-display text-2xl font-bold">72<span class="text-inkfaint text-lg">%</span></div>
+          <span class="mono text-xs text-pine">▲ 8% this month</span>
+        </div>
+        <div class="h-1.5 bg-line rounded-full mt-3 overflow-hidden"><div class="h-full w-[72%] bg-pine rounded-full"></div></div>
+        <p class="text-xs text-inkfaint mt-3 leading-relaxed">Connect AI execution once your approval workflow is ready.</p>
+      </div>
+    </div>
+  </aside>
+
+  <main class="lg:ml-64 flex-1 min-w-0">
+    <!-- Header -->
+    <header class="h-20 bg-surface/90 backdrop-blur border-b border-line sticky top-0 z-20 flex items-center justify-between px-5 md:px-8">
+      <div>
+        <div class="eyebrow text-inkfaint">Console</div>
+        <h1 id="pageTitle" class="font-display font-bold text-lg leading-tight">Dashboard</h1>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="relative hidden md:block">
+          <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-inkfaint" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+          <input placeholder="Search requests, clients…" onkeydown="if(event.key==='Enter'){showPage('requests');document.getElementById('searchBox').value=this.value;renderRequests();}" class="field pl-9 w-72">
+        </div>
+        <button onclick="showToast('You’re all caught up — no new notifications')" class="w-10 h-10 rounded-lg border border-line bg-surface grid place-items-center text-inksoft hover:bg-inset transition">
+          <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        </button>
+        <div class="flex items-center gap-2.5 pl-1">
+          <div id="userInitials" class="w-9 h-9 rounded-full bg-ink text-white grid place-items-center mono text-xs font-semibold">MS</div>
+          <div class="hidden md:block leading-tight">
+            <div id="userName" class="text-sm font-semibold">Michael</div>
+            <div class="eyebrow text-inkfaint">Admin</div>
+          </div>
+        </div>
+        <button id="signOutBtn" title="Sign out" class="w-10 h-10 rounded-lg border border-line bg-surface grid place-items-center text-inksoft hover:bg-inset transition">
+          <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l-5-5 5-5"/><path d="M5 12h11"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="p-5 md:p-8 max-w-[1500px] mx-auto">
+
+      <!-- DASHBOARD -->
+      <section id="dashboard" class="page active">
+        <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+          <div>
+            <p class="eyebrow text-gold">Thursday · 13 August 2026</p>
+            <h2 class="font-display text-3xl md:text-4xl font-bold mt-2">Good afternoon, Michael.</h2>
+            <p class="text-inksoft mt-2">Three requests are waiting on your decision.</p>
+          </div>
+          <button onclick="openRequest()" class="btn-ink px-5 py-3 rounded-lg font-semibold text-sm shadow-sm hover:shadow transition inline-flex items-center gap-2">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            New request
+          </button>
+        </div>
+
+        <!-- metrics -->
+        <div class="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+          <div class="card p-5">
+            <div class="eyebrow text-inkfaint">Total requests</div>
+            <div class="font-display text-3xl font-bold mt-3">148</div>
+            <div class="mono text-xs text-pine mt-2">▲ 18% vs last month</div>
+          </div>
+          <div class="card p-5 attn">
+            <div class="eyebrow text-inkfaint">Awaiting you</div>
+            <div class="font-display text-3xl font-bold mt-3">3</div>
+            <div class="mono text-xs text-gold mt-2">Needs a decision</div>
+          </div>
+          <div class="card p-5">
+            <div class="eyebrow text-inkfaint">In progress</div>
+            <div class="font-display text-3xl font-bold mt-3">5</div>
+            <div class="mono text-xs text-inksoft mt-2">2 due today</div>
+          </div>
+          <div class="card p-5">
+            <div class="eyebrow text-inkfaint">Avg. turnaround</div>
+            <div class="font-display text-3xl font-bold mt-3">1.8<span class="text-inkfaint text-xl">d</span></div>
+            <div class="mono text-xs text-pine mt-2">▼ 0.4d faster</div>
+          </div>
+        </div>
+
+        <div class="grid xl:grid-cols-3 gap-6">
+          <!-- recent -->
+          <div class="xl:col-span-2 card overflow-hidden">
+            <div class="p-5 border-b border-line flex items-center justify-between">
+              <div>
+                <h3 class="font-display font-bold text-lg">Recent requests</h3>
+                <p class="text-xs text-inkfaint mt-0.5">Latest activity across all clients</p>
+              </div>
+              <button onclick="showPage('requests')" class="text-sm text-pine font-semibold hover:underline">View all →</button>
+            </div>
+            <div id="recentRequests"></div>
+          </div>
+
+          <!-- breakdown -->
+          <div class="card">
+            <div class="p-5 border-b border-line">
+              <h3 class="font-display font-bold text-lg">What clients ask for</h3>
+              <p class="text-xs text-inkfaint mt-0.5">Share of requests this year</p>
+            </div>
+            <div class="p-5 space-y-4" id="breakdown"></div>
+          </div>
+        </div>
+
+        <!-- signature: the approval pipeline -->
+        <div class="grid lg:grid-cols-3 gap-6 mt-6">
+          <div class="lg:col-span-2 rounded-2xl bg-ink text-white p-6 md:p-8">
+            <div class="eyebrow text-gold">The workflow</div>
+            <h3 class="font-display text-2xl font-bold mt-2">You decide. AI does the lifting.</h3>
+            <p class="text-white/55 mt-2 max-w-xl text-sm leading-relaxed">A request travels the same four stops every time. Nothing reaches a live site until it passes through you.</p>
+
+            <div class="pipe grid grid-cols-4 gap-2 mt-8">
+              <div class="text-center">
+                <div class="w-11 h-11 mx-auto rounded-full bg-white/10 grid place-items-center mono text-sm relative z-10">01</div>
+                <div class="text-xs font-semibold mt-3">Client submits</div>
+                <div class="text-[11px] text-white/45 mt-0.5">via portal</div>
+              </div>
+              <div class="text-center">
+                <div class="w-11 h-11 mx-auto rounded-full bg-white/10 grid place-items-center mono text-sm relative z-10">02</div>
+                <div class="text-xs font-semibold mt-3">AI analyses</div>
+                <div class="text-[11px] text-white/45 mt-0.5">plans the work</div>
+              </div>
+              <div class="text-center">
+                <div class="w-11 h-11 mx-auto rounded-full bg-gold text-ink grid place-items-center mono text-sm font-semibold relative z-10 ring-4 ring-gold/25">03</div>
+                <div class="text-xs font-semibold mt-3 text-gold">You approve</div>
+                <div class="text-[11px] text-white/45 mt-0.5">the gate</div>
+              </div>
+              <div class="text-center">
+                <div class="w-11 h-11 mx-auto rounded-full bg-white/10 grid place-items-center mono text-sm relative z-10">04</div>
+                <div class="text-xs font-semibold mt-3">Job runs</div>
+                <div class="text-[11px] text-white/45 mt-0.5">ships live</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card p-6 flex flex-col">
+            <div class="eyebrow text-inkfaint">Client satisfaction</div>
+            <div class="font-display text-5xl font-bold mt-3">96<span class="text-inkfaint text-2xl">%</span></div>
+            <div class="mono text-xs text-pine mt-2">▲ 4.2% this quarter</div>
+            <div class="mt-auto pt-6 text-xs text-inkfaint">From 74 completed request ratings</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- REQUESTS -->
+      <section id="requests" class="page">
+        <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
+          <div>
+            <h2 class="font-display text-2xl font-bold">Requests</h2>
+            <p class="text-inksoft mt-1">Every client change, from submission to done.</p>
+          </div>
+          <button onclick="openRequest()" class="btn-ink px-5 py-3 rounded-lg font-semibold text-sm inline-flex items-center gap-2">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            New request
+          </button>
+        </div>
+
+        <div class="card p-4 mb-5">
+          <div class="grid md:grid-cols-5 gap-3">
+            <input id="searchBox" oninput="renderRequests()" placeholder="Search requests…" class="field md:col-span-2">
+            <select id="statusFilter" onchange="renderRequests()" class="field"><option>All statuses</option><option>New</option><option>In Progress</option><option>Awaiting Approval</option><option>Completed</option></select>
+            <select id="typeFilter" onchange="renderRequests()" class="field"><option>All types</option><option>Content</option><option>Design</option><option>Bug</option><option>Feature</option><option>SEO</option></select>
+            <select class="field"><option>All clients</option><option>Medway Invicta FC</option><option>Velvet Hair Studio</option><option>Northstar Clothing</option><option>Elite Cuts</option></select>
+          </div>
+        </div>
+
+        <div class="card overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-inset border-b border-line">
+                <tr class="text-left eyebrow text-inkfaint">
+                  <th class="px-5 py-4 font-normal">Request</th>
+                  <th class="font-normal">Client</th>
+                  <th class="font-normal">Type</th>
+                  <th class="font-normal">Priority</th>
+                  <th class="font-normal">Status</th>
+                  <th class="font-normal">Submitted</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="requestTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- CLIENTS -->
+      <section id="clients" class="page">
+        <div class="mb-6">
+          <h2 class="font-display text-2xl font-bold">Clients</h2>
+          <p class="text-inksoft mt-1">Accounts, sites and request history.</p>
+        </div>
+        <div class="grid md:grid-cols-2 xl:grid-cols-3 gap-5" id="clientGrid"></div>
+      </section>
+
+      <!-- ANALYTICS -->
+      <section id="analytics" class="page">
+        <div class="mb-6">
+          <h2 class="font-display text-2xl font-bold">Analytics</h2>
+          <p class="text-inksoft mt-1">Where your development time is going.</p>
+        </div>
+        <div class="grid md:grid-cols-3 gap-4 mb-6">
+          <div class="card p-5"><div class="eyebrow text-inkfaint">Requests this month</div><div class="font-display text-3xl font-bold mt-3">18</div><div class="mono text-xs text-pine mt-2">▲ 12.5%</div></div>
+          <div class="card p-5"><div class="eyebrow text-inkfaint">Billable work identified</div><div class="font-display text-3xl font-bold mt-3">£1,460</div><div class="mono text-xs text-inkfaint mt-2">across 7 requests</div></div>
+          <div class="card p-5"><div class="eyebrow text-inkfaint">AI-ready requests</div><div class="font-display text-3xl font-bold mt-3">61%</div><div class="mono text-xs text-pine mt-2">90 / 148 requests</div></div>
+        </div>
+        <div class="grid lg:grid-cols-2 gap-6">
+          <div class="card p-6">
+            <h3 class="font-display font-bold text-lg">Requests by month</h3>
+            <div class="h-64 mt-6 flex items-end gap-2.5">
+              <div class="flex-1 bg-pine/25 rounded-t-md h-[35%]"></div>
+              <div class="flex-1 bg-pine/35 rounded-t-md h-[48%]"></div>
+              <div class="flex-1 bg-pine/45 rounded-t-md h-[42%]"></div>
+              <div class="flex-1 bg-pine/60 rounded-t-md h-[60%]"></div>
+              <div class="flex-1 bg-pine/75 rounded-t-md h-[72%]"></div>
+              <div class="flex-1 bg-pine/90 rounded-t-md h-[83%]"></div>
+              <div class="flex-1 bg-pine rounded-t-md h-[95%]"></div>
+            </div>
+            <div class="flex justify-between mono text-xs text-inkfaint mt-3"><span>Feb</span><span>Aug</span></div>
+          </div>
+          <div class="card p-6">
+            <h3 class="font-display font-bold text-lg">Most requested work</h3>
+            <div class="space-y-5 mt-6" id="topWork"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- AI -->
+      <section id="ai" class="page">
+        <div class="mb-6">
+          <h2 class="font-display text-2xl font-bold">AI job queue</h2>
+          <p class="text-inksoft mt-1">AI prepares the work. You hold the gate.</p>
+        </div>
+
+        <div class="rounded-2xl bg-ink text-white p-6 mb-6 flex flex-col md:flex-row justify-between gap-5">
+          <div>
+            <div class="eyebrow text-gold">Controlled automation</div>
+            <h3 class="font-display text-2xl font-bold mt-2">Nothing ships without approval.</h3>
+            <p class="text-white/55 mt-2 max-w-xl text-sm leading-relaxed">AI inspects the request, understands the project, proposes the files to change and prepares a job. Your approval is the gate before anything runs.</p>
+          </div>
+          <div class="self-start inline-flex items-center gap-2 bg-pine/15 text-emerald-300 rounded-lg px-3 py-2 mono text-xs whitespace-nowrap">● Approval gate on</div>
+        </div>
+
+        <div class="space-y-4">
+          <div class="card p-5 attn">
+            <div class="flex flex-col md:flex-row justify-between gap-4">
+              <div>
+                <span class="badge b-gold">Awaiting approval</span>
+                <h3 class="font-display font-bold text-lg mt-3">Update fixture list — Medway Invicta FC</h3>
+                <p class="text-sm text-inksoft mt-1">Update the Firestore fixtures collection and regenerate the fixtures page.</p>
+                <div class="mono text-xs text-inkfaint mt-3">risk: low · est. 8 min · files: 2</div>
+              </div>
+              <div class="flex gap-2 self-start">
+                <button onclick="approveAI(this)" class="btn-pine px-4 py-2 rounded-lg text-sm font-semibold">Approve</button>
+                <button onclick="showToast('Sent back for review')" class="border border-line px-4 py-2 rounded-lg text-sm hover:bg-inset transition">Review</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card p-5 attn">
+            <div class="flex flex-col md:flex-row justify-between gap-4">
+              <div>
+                <span class="badge b-gold">Awaiting approval</span>
+                <h3 class="font-display font-bold text-lg mt-3">Change homepage headline — Velvet Hair Studio</h3>
+                <p class="text-sm text-inksoft mt-1">A single-file content update, ready to run.</p>
+                <div class="mono text-xs text-inkfaint mt-3">risk: very low · est. 2 min · files: 1</div>
+              </div>
+              <div class="flex gap-2 self-start">
+                <button onclick="approveAI(this)" class="btn-pine px-4 py-2 rounded-lg text-sm font-semibold">Approve</button>
+                <button onclick="showToast('Sent back for review')" class="border border-line px-4 py-2 rounded-lg text-sm hover:bg-inset transition">Review</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card p-5">
+            <div class="flex flex-col md:flex-row justify-between gap-4">
+              <div>
+                <span class="badge b-pine">Analysing</span>
+                <h3 class="font-display font-bold text-lg mt-3">Add new product collection — Northstar Clothing</h3>
+                <p class="text-sm text-inksoft mt-1">Reading the existing catalogue structure to plan the change.</p>
+                <div class="mono text-xs text-inkfaint mt-3">started 6 minutes ago</div>
+              </div>
+              <div class="self-center mono text-sm text-pine">analysing…</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ACTIVITY -->
+      <section id="activity" class="page">
+        <div class="mb-6">
+          <h2 class="font-display text-2xl font-bold">Activity</h2>
+          <p class="text-inksoft mt-1">A full audit trail of client and admin activity.</p>
+        </div>
+        <div class="card p-6">
+          <div class="space-y-1" id="activityLog"></div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- New Request Modal -->
+<div id="modal" class="fixed inset-0 bg-ink/45 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+  <div class="bg-surface rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden">
+    <div class="p-6 border-b border-line flex justify-between items-start">
+      <div>
+        <h2 class="font-display text-xl font-bold">Create request</h2>
+        <p class="text-sm text-inksoft mt-1">In production this form is what your clients fill in.</p>
+      </div>
+      <button onclick="closeRequest()" class="text-inkfaint hover:text-ink text-2xl leading-none">×</button>
+    </div>
+    <form onsubmit="submitRequest(event)" class="p-6 space-y-4">
+      <div class="grid md:grid-cols-2 gap-4">
+        <div><label class="text-sm font-semibold">Client</label><select id="newClient" class="field mt-1.5"><option>Medway Invicta FC</option><option>Velvet Hair Studio</option><option>Northstar Clothing</option><option>Elite Cuts</option></select></div>
+        <div><label class="text-sm font-semibold">Request type</label><select id="newType" class="field mt-1.5"><option>Content</option><option>Design</option><option>Bug</option><option>Feature</option><option>SEO</option></select></div>
+      </div>
+      <div><label class="text-sm font-semibold">Title</label><input id="newTitle" required placeholder="e.g. Update the homepage banner" class="field mt-1.5"></div>
+      <div><label class="text-sm font-semibold">Description</label><textarea id="newDesc" required rows="4" placeholder="Describe exactly what needs changing…" class="field mt-1.5"></textarea></div>
+      <div class="grid md:grid-cols-2 gap-4">
+        <div><label class="text-sm font-semibold">Priority</label><select id="newPriority" class="field mt-1.5"><option>Normal</option><option>Low</option><option>High</option><option>Urgent</option></select></div>
+        <div><label class="text-sm font-semibold">Target date</label><input type="date" class="field mt-1.5"></div>
+      </div>
+      <div class="rounded-xl bg-inset border border-line p-4 text-sm">
+        <b class="font-display">Next: AI triage</b>
+        <p class="text-inksoft mt-1">Once connected, AI categorises the request, estimates complexity, flags missing detail and drafts an implementation plan before it reaches you.</p>
+      </div>
+      <div class="flex justify-end gap-3 pt-1">
+        <button type="button" onclick="closeRequest()" class="px-4 py-3 rounded-lg border border-line hover:bg-inset transition text-sm font-medium">Cancel</button>
+        <button class="px-5 py-3 rounded-lg btn-ink font-semibold text-sm">Submit request</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="toast" class="toast fixed bottom-5 right-5 bg-ink text-white px-5 py-3 rounded-lg shadow-2xl z-[60] text-sm mono"></div>
+
+<script>
+const data = [
+ {id:'REQ-0148', title:'Update player statistics', client:'Medway Invicta FC', type:'Content', priority:'Normal', status:'New', date:'13 Aug · 15:42'},
+ {id:'REQ-0147', title:'Change booking confirmation email', client:'Elite Cuts', type:'Content', priority:'Low', status:'Completed', date:'13 Aug · 12:18'},
+ {id:'REQ-0146', title:'Add summer collection', client:'Northstar Clothing', type:'Feature', priority:'High', status:'Awaiting Approval', date:'12 Aug · 16:08'},
+ {id:'REQ-0145', title:'Homepage spacing issue on mobile', client:'Velvet Hair Studio', type:'Bug', priority:'High', status:'In Progress', date:'12 Aug · 14:31'},
+ {id:'REQ-0144', title:'Replace hero image', client:'Medway Invicta FC', type:'Design', priority:'Normal', status:'Completed', date:'11 Aug · 10:14'},
+ {id:'REQ-0143', title:'Add meta descriptions', client:'Northstar Clothing', type:'SEO', priority:'Normal', status:'Completed', date:'10 Aug · 09:51'},
+];
+
+const clients = [
+ {code:'MI', name:'Medway Invicta FC', kind:'Football club · Firebase site', requests:41, open:3, avg:'1.4d'},
+ {code:'VH', name:'Velvet Hair Studio', kind:'Beauty · Booking site', requests:32, open:2, avg:'1.9d'},
+ {code:'NC', name:'Northstar Clothing', kind:'E-commerce · Custom portal', requests:28, open:1, avg:'2.2d'},
+ {code:'EC', name:'Elite Cuts', kind:'Barber · Booking site', requests:19, open:1, avg:'1.7d'},
+];
+
+const breakdown = [
+ {label:'Content / text', pct:38, color:'bg-pine'},
+ {label:'Design / layout', pct:24, color:'bg-pine/70'},
+ {label:'Bug / issue', pct:19, color:'bg-gold'},
+ {label:'Feature', pct:13, color:'bg-pine/45'},
+ {label:'Other', pct:6, color:'bg-inkfaint'},
+];
+
+const topWork = [
+ {label:'Text / content changes', n:56, w:82, color:'bg-pine'},
+ {label:'Design changes', n:35, w:60, color:'bg-pine/70'},
+ {label:'Bug fixes', n:28, w:48, color:'bg-gold'},
+ {label:'New features', n:19, w:35, color:'bg-pine/45'},
+];
+
+const activity = [
+ {kind:'new',  title:'New request submitted', body:'Medway Invicta FC submitted “Update player statistics”.', time:'13 Aug · 15:42'},
+ {kind:'done', title:'Request completed', body:'Elite Cuts — “Change booking confirmation email”.', time:'13 Aug · 14:18'},
+ {kind:'gate', title:'Approval requested', body:'AI prepared a job for the Medway Invicta FC website.', time:'13 Aug · 13:51'},
+ {kind:'seen', title:'Client portal accessed', body:'Velvet Hair Studio logged in.', time:'13 Aug · 12:06'},
+];
+
+const statusClass = { 'New':'b-neutral','In Progress':'b-pine','Awaiting Approval':'b-gold','Completed':'b-done' };
+const prioClass   = { 'High':'b-clay','Urgent':'b-clay-solid','Normal':'b-neutral','Low':'b-faint' };
+
+function badge(value, kind){
+ const cls = (kind === 'priority' ? prioClass[value] : statusClass[value]) || 'b-neutral';
+ return `<span class="badge ${cls}">${value}</span>`;
+}
+
+function renderRecent(){
+ document.getElementById('recentRequests').innerHTML = data.slice(0,4).map(r => `
+  <div class="px-5 py-4 border-b border-line last:border-0 hover:bg-inset cursor-pointer transition" onclick="showToast('${r.id} opened')">
+    <div class="flex items-center gap-4">
+      <div class="w-10 h-10 rounded-lg bg-inset border border-line grid place-items-center mono text-[11px] font-semibold text-inksoft">${r.type.slice(0,2).toUpperCase()}</div>
+      <div class="flex-1 min-w-0">
+        <div class="font-semibold truncate">${r.title}</div>
+        <div class="mono text-xs text-inkfaint mt-0.5">${r.client} · ${r.id} · ${r.date}</div>
+      </div>
+      <div class="hidden sm:block">${badge(r.status)}</div>
+    </div>
+  </div>`).join('');
+}
+
+function renderRequests(){
+ const q = (document.getElementById('searchBox')?.value || '').toLowerCase();
+ const s = document.getElementById('statusFilter')?.value || 'All statuses';
+ const t = document.getElementById('typeFilter')?.value || 'All types';
+ const filtered = data.filter(r =>
+   (!q || (r.title + r.client + r.id).toLowerCase().includes(q)) &&
+   (s === 'All statuses' || r.status === s) &&
+   (t === 'All types' || r.type === t));
+ document.getElementById('requestTable').innerHTML = filtered.map(r => `
+  <tr class="border-b border-line last:border-0 hover:bg-inset transition">
+    <td class="px-5 py-4"><div class="font-semibold">${r.title}</div><div class="mono text-xs text-inkfaint mt-0.5">${r.id}</div></td>
+    <td class="pr-4 text-inksoft">${r.client}</td>
+    <td class="text-inksoft">${r.type}</td>
+    <td>${badge(r.priority,'priority')}</td>
+    <td>${badge(r.status)}</td>
+    <td class="mono text-xs text-inkfaint whitespace-nowrap">${r.date}</td>
+    <td class="pr-5"><button onclick="showToast('${r.id} opened')" class="text-pine font-semibold text-xs hover:underline">View</button></td>
+  </tr>`).join('') || `<tr><td colspan="7" class="p-12 text-center text-inkfaint">No requests match those filters.</td></tr>`;
+}
+
+function renderBreakdown(){
+ document.getElementById('breakdown').innerHTML = breakdown.map(b => `
+  <div>
+    <div class="flex justify-between text-sm mb-2"><span class="text-inksoft">${b.label}</span><b class="mono text-xs">${b.pct}%</b></div>
+    <div class="h-2 bg-inset rounded-full overflow-hidden"><div class="h-full ${b.color} rounded-full" style="width:${b.pct}%"></div></div>
+  </div>`).join('');
+}
+
+function renderTopWork(){
+ document.getElementById('topWork').innerHTML = topWork.map(t => `
+  <div>
+    <div class="flex justify-between text-sm"><span class="text-inksoft">${t.label}</span><b class="mono text-xs">${t.n}</b></div>
+    <div class="h-2 bg-inset rounded-full mt-2 overflow-hidden"><div class="h-full ${t.color} rounded-full" style="width:${t.w}%"></div></div>
+  </div>`).join('');
+}
+
+function renderClients(){
+ document.getElementById('clientGrid').innerHTML = clients.map(c => `
+  <div class="card p-5">
+    <div class="flex justify-between items-start">
+      <div class="w-12 h-12 rounded-lg bg-ink text-white grid place-items-center mono text-sm font-semibold">${c.code}</div>
+      <span class="badge b-done">Active</span>
+    </div>
+    <h3 class="font-display font-bold text-lg mt-4">${c.name}</h3>
+    <p class="text-xs text-inkfaint mt-0.5">${c.kind}</p>
+    <div class="grid grid-cols-3 mt-5 text-center border-t border-line pt-4">
+      <div><div class="font-display font-bold">${c.requests}</div><div class="eyebrow text-inkfaint mt-1">Requests</div></div>
+      <div><div class="font-display font-bold">${c.open}</div><div class="eyebrow text-inkfaint mt-1">Open</div></div>
+      <div><div class="font-display font-bold">${c.avg}</div><div class="eyebrow text-inkfaint mt-1">Avg</div></div>
+    </div>
+  </div>`).join('');
+}
+
+function renderActivity(){
+ const dot = {
+   new:  ['b','bg-pinesoft text-pine'],
+   done: ['✓','bg-[#e8f1ec] text-[#2f6b43]'],
+   gate: ['!','bg-goldsoft text-gold'],
+   seen: ['→','bg-inset text-inksoft']
+ };
+ document.getElementById('activityLog').innerHTML = activity.map((a,i) => {
+   const [ic,cl] = dot[a.kind];
+   const line = i < activity.length-1 ? 'border-l border-line' : '';
+   return `
+   <div class="flex gap-4">
+     <div class="flex flex-col items-center">
+       <div class="w-9 h-9 rounded-full ${cl} grid place-items-center mono text-sm font-semibold shrink-0">${ic}</div>
+       <div class="flex-1 ${line} my-1"></div>
+     </div>
+     <div class="pb-6">
+       <b class="font-display">${a.title}</b>
+       <p class="text-sm text-inksoft mt-0.5">${a.body}</p>
+       <span class="mono text-xs text-inkfaint">${a.time}</span>
+     </div>
+   </div>`;
+ }).join('');
+}
+
+function showPage(id){
+ document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
+ document.getElementById(id).classList.add('active');
+ document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x.dataset.page === id));
+ const titles = { dashboard:'Dashboard', requests:'Requests', clients:'Clients', analytics:'Analytics', ai:'AI queue', activity:'Activity' };
+ document.getElementById('pageTitle').textContent = titles[id] || id;
+ window.scrollTo({ top:0, behavior:'smooth' });
+ if(id === 'requests') renderRequests();
+}
+
+function openRequest(){ const m = document.getElementById('modal'); m.classList.remove('hidden'); m.classList.add('flex'); }
+function closeRequest(){ const m = document.getElementById('modal'); m.classList.add('hidden'); m.classList.remove('flex'); }
+
+function submitRequest(e){
+ e.preventDefault();
+ const title = document.getElementById('newTitle').value,
+       client = document.getElementById('newClient').value,
+       type = document.getElementById('newType').value,
+       priority = document.getElementById('newPriority').value;
+ data.unshift({ id:'REQ-0149', title, client, type, priority, status:'New', date:'13 Aug · 16:40' });
+ closeRequest(); renderRecent(); renderRequests(); showPage('requests');
+ showToast('Request created — REQ-0149');
+ e.target.reset();
+}
+
+function approveAI(btn){
+ btn.parentElement.innerHTML = '<span class="badge b-done">Approved · ready to run</span>';
+ const card = btn.closest('.card'); if(card) card.classList.remove('attn');
+ showToast('Job approved — queued for execution');
+}
+
+function showToast(msg){
+ const t = document.getElementById('toast');
+ t.textContent = msg; t.classList.add('show');
+ clearTimeout(window.tt); window.tt = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+renderRecent(); renderRequests(); renderBreakdown(); renderTopWork(); renderClients(); renderActivity();
+</script>
+
+<!-- Auth guard: redirect out if not an admin, otherwise fill in identity and enable sign-out -->
+<script type="module">
+  import { auth, db } from './firebase-config.js';
+  import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
+  import { doc, getDoc } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
+
+  const gate = document.getElementById('authGate');
+
+  onAuthStateChanged(auth, async (user) => {
+    if (!user) { location.replace('login.html'); return; }
+
+    let role = null, name = user.email;
+    try {
+      const snap = await getDoc(doc(db, 'users', user.uid));
+      if (snap.exists()) { role = snap.data().role; name = snap.data().name || name; }
+    } catch (e) { console.error('Could not load user profile:', e); }
+
+    if (role !== 'admin') { location.replace('login.html?e=notadmin'); return; }
+
+    document.getElementById('userName').textContent = name;
+    document.getElementById('userInitials').textContent =
+      name.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+
+    gate.remove(); // reveal the console
+  });
+
+  document.getElementById('signOutBtn').addEventListener('click', async () => {
+    await signOut(auth);
+    location.replace('login.html');
+  });
+</script>
+</body>
+</html>
