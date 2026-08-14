@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Requests / Studio</title>
+<title>Requests / Updates</title>
 
 <!-- Firebase (compat SDK — works from a plain <script>, no build step) -->
 <script src="https://www.gstatic.com/firebasejs/12.17.1/firebase-app-compat.js"></script>
@@ -129,20 +129,21 @@ html,body{margin:0}
 <!--  EDIT THIS BLOCK — your Firebase config + your emails         -->
 <!-- ============================================================= -->
 <script>
-
-const firebaseConfig = {
-  apiKey: "AIzaSyC2KDOdapXV9ByYM1WdHecJ1oLBuIBwGQY",
-  authDomain: "aa-webdev.firebaseapp.com",
-  projectId: "aa-webdev",
-  storageBucket: "aa-webdev.firebasestorage.app",
-  messagingSenderId: "760720815803",
-  appId: "1:760720815803:web:37bae8bff1900ea1a1db9e",
-  measurementId: "G-JRSP3EVKHZ"
-};
+  const firebaseConfig = {
+    apiKey: "AIzaSyC2KDOdapXV9ByYM1WdHecJ1oLBuIBwGQY",
+    authDomain: "aa-webdev.firebaseapp.com",
+    projectId: "aa-webdev",
+    storageBucket: "aa-webdev.firebasestorage.app",
+    messagingSenderId: "760720815803",
+    appId: "1:760720815803:web:37bae8bff1900ea1a1db9e",
+    measurementId: "G-JRSP3EVKHZ"
+  };
   // Any account signing in with one of these emails gets the admin view.
   window.ADMIN_EMAILS = ["msdevsolutions.hi@gmail.com"];
   // Where clients are told to email their images.
   window.STUDIO_EMAIL = "msdevsolutions.hi@gmail.com";
+  // Where clients are sent to top up tokens.
+  window.PRICING_URL = "https://michvl1.github.io/MS-Portfolio/Pricing.html";
 
   firebase.initializeApp(firebaseConfig);
   window.auth = firebase.auth();
@@ -155,6 +156,18 @@ const { useState, useEffect } = React;
 const auth = window.auth, db = window.db;
 const ADMIN_EMAILS = (window.ADMIN_EMAILS || []).map((e) => e.toLowerCase());
 const STUDIO_EMAIL = window.STUDIO_EMAIL || "";
+const PRICING_URL = window.PRICING_URL || "#";
+
+// ---- token economy ----
+const MONTHLY_FREE = 10;                                   // free tokens granted each month (do not roll over)
+const PRIORITY_COST = { low: 1, medium: 2, high: 4, urgent: 6 };
+const TYPE_COST = {
+  "Content update": 3, "Bug fix": 2, "New feature": 10,
+  "Design change": 5, "SEO": 4, "Other": 3,               // "Other" wasn't specified — default 3, adjust to taste
+};
+const costOf = (type, priority) => (TYPE_COST[type] || 0) + (PRIORITY_COST[priority] || 0);
+const ymNow = () => new Date().toISOString().slice(0, 7); // e.g. "2026-08"
+const FieldValue = firebase.firestore.FieldValue;
 
 const mailtoImages = (r) =>
   `mailto:${STUDIO_EMAIL}?subject=${encodeURIComponent(r.code)}` +
@@ -209,6 +222,7 @@ function Ticket({ r, onClick, selected }) {
       <div className="t-meta">
         <span className={"pri pri-" + r.priority}>{r.priority}</span>
         <span className="type-chip">{r.type}</span>
+        {r.cost != null && <span className="type-chip">−{r.cost}</span>}
         <span className="t-code" style={{ marginLeft: "auto" }}>{ago(r.createdAt)}</span>
       </div>
     </button>
@@ -258,7 +272,8 @@ function AuthScreen() {
       if (up) {
         const cred = await auth.createUserWithEmailAndPassword(f.email.trim(), f.password);
         await db.collection("users").doc(cred.user.uid).set(
-          { name: f.name.trim(), website: f.website.trim(), email: cred.user.email }, { merge: true });
+          { name: f.name.trim(), website: f.website.trim(), email: cred.user.email,
+            freeTokens: MONTHLY_FREE, purchasedTokens: 0, tokenPeriod: ymNow() }, { merge: true });
       } else {
         await auth.signInWithEmailAndPassword(f.email.trim(), f.password);
       }
@@ -314,10 +329,21 @@ function ProfileSetup({ onSave }) {
 }
 
 /* ---------------- client ---------------- */
-function ClientView({ profile, requests, createRequest, updateRequest }) {
+function ClientView({ profile, requests, createRequest, updateRequest, tokens, freeNow, purchasedNow }) {
   return (
-    <div className="two">
-      <NewRequestForm onSubmit={createRequest} who={profile} />
+    <>
+    <div className="panel" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 16px", marginTop: 22 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+        <span className="mark" style={{ width: 30, height: 30, fontSize: 15 }}>◆</span>
+        <div>
+          <div style={{ fontFamily: "var(--disp)", fontWeight: 700, fontSize: 15, lineHeight: 1.1 }}>{tokens} tokens available</div>
+          <div style={{ fontSize: 11, color: "var(--ink2)", marginTop: 2 }}>{freeNow} monthly (resets each month) · {purchasedNow} purchased</div>
+        </div>
+      </div>
+      <a className="btn btn-sm" href={PRICING_URL} target="_blank" rel="noopener">Buy tokens</a>
+    </div>
+    <div className="two" style={{ paddingTop: 22 }}>
+      <NewRequestForm onSubmit={createRequest} who={profile} tokens={tokens} />
       <div>
         <div className="stack-head"><h2>Your requests</h2><span className="eyebrow">{requests.length} total</span></div>
         {requests.length === 0 ? (
@@ -329,22 +355,28 @@ function ClientView({ profile, requests, createRequest, updateRequest }) {
         ) : requests.map((r) => <ClientTicket key={r.id} r={r} updateRequest={updateRequest} who={profile} />)}
       </div>
     </div>
+    </>
   );
 }
 
-function NewRequestForm({ onSubmit, who }) {
+function NewRequestForm({ onSubmit, who, tokens }) {
   const empty = { title: "", description: "", type: TYPES[0], priority: "medium", page: "" };
   const [f, setF] = useState(empty);
   const [sent, setSent] = useState(null);
   const [busy, setBusy] = useState(false);
+  const cost = costOf(f.type, f.priority);
+  const enough = tokens >= cost;
   const ok = f.title.trim() && f.description.trim();
   const send = async () => {
-    if (!ok || busy) return;
+    if (!ok || busy || !enough) return;
     setBusy(true);
     try {
       const r = await onSubmit({ title: f.title.trim(), description: f.description.trim(), type: f.type, priority: f.priority, page: f.page.trim() });
       setF(empty); setSent(r || null);
-    } catch (e) { alert("Couldn't send the request. Check your connection and try again."); }
+    } catch (e) {
+      if (e && e.code === "insufficient") alert(`Not enough tokens for this request (needs ${cost}). Please buy more.`);
+      else alert("Couldn't send the request. Check your connection and try again.");
+    }
     setBusy(false);
   };
 
@@ -379,15 +411,31 @@ function NewRequestForm({ onSubmit, who }) {
       <div className="row2">
         <div className="field"><label>Type</label>
           <select className="select" value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>
-            {TYPES.map((t) => <option key={t}>{t}</option>)}</select></div>
+            {TYPES.map((t) => <option key={t} value={t}>{t} (−{TYPE_COST[t]})</option>)}</select></div>
         <div className="field"><label>Priority</label>
           <select className="select" value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })}>
-            {PRIORITIES.map((p) => <option key={p} value={p}>{p[0].toUpperCase() + p.slice(1)}</option>)}</select></div>
+            {PRIORITIES.map((p) => <option key={p} value={p}>{p[0].toUpperCase() + p.slice(1)} (−{PRIORITY_COST[p]})</option>)}</select></div>
       </div>
       <div className="field"><label>Page or URL <span style={{ color: "var(--ink2)", fontWeight: 400 }}>(optional)</span></label>
         <input className="input" value={f.page} onChange={(e) => setF({ ...f, page: e.target.value })} placeholder="/contact" /></div>
-      <div className="hint" style={{ display: "block", marginBottom: 12 }}>Have images? Send this first — you'll get a request ID to email them with.</div>
-      <button className="btn btn-primary" style={{ width: "100%" }} disabled={!ok || busy} onClick={send}>{busy ? "Sending…" : "Send request"}</button>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, padding: "10px 0", borderTop: "1px solid var(--line2)", marginTop: 4 }}>
+        <span style={{ color: "var(--ink2)" }}>Cost of this request</span>
+        <span style={{ fontFamily: "var(--mono)", fontWeight: 600, color: enough ? "var(--ink)" : "#B42318" }}>
+          −{cost} tokens · {tokens} left
+        </span>
+      </div>
+      {!enough ? (
+        <div className="ai" style={{ marginTop: 0, borderColor: "#F0C9C9", background: "#FDF3F3" }}>
+          <h4 style={{ marginBottom: 6 }}>Not enough tokens</h4>
+          <p>This request needs {cost} tokens and you have {tokens}. Top up to submit it.</p>
+          <a className="btn btn-primary btn-sm" href={PRICING_URL} target="_blank" rel="noopener" style={{ display: "inline-block", textDecoration: "none" }}>Buy more tokens</a>
+        </div>
+      ) : (
+        <div className="hint" style={{ display: "block", marginBottom: 12 }}>Have images? Send this first — you'll get a request ID to email them with.</div>
+      )}
+      <button className="btn btn-primary" style={{ width: "100%", marginTop: enough ? 0 : 12 }} disabled={!ok || busy || !enough} onClick={send}>
+        {busy ? "Sending…" : `Send request (−${cost})`}
+      </button>
     </div>
   );
 }
@@ -432,7 +480,7 @@ function ClientTicket({ r, updateRequest, who }) {
 }
 
 /* ---------------- admin ---------------- */
-function AdminView({ requests, updateRequest }) {
+function AdminView({ requests, updateRequest, grantTokens }) {
   const [filter, setFilter] = useState("open");
   const [selId, setSelId] = useState(null);
   const openSet = ["new", "in_progress", "needs_info"];
@@ -460,7 +508,7 @@ function AdminView({ requests, updateRequest }) {
       </aside>
       <div>
         {sel ? (
-          <RequestDetail r={sel} onBack={() => setSelId(null)} updateRequest={updateRequest} />
+          <RequestDetail r={sel} onBack={() => setSelId(null)} updateRequest={updateRequest} grantTokens={grantTokens} />
         ) : (<>
           <div className="stack-head">
             <h2>{navi.find((n) => n[0] === filter)[1]}</h2>
@@ -478,7 +526,30 @@ function AdminView({ requests, updateRequest }) {
   );
 }
 
-function RequestDetail({ r, onBack, updateRequest }) {
+function GrantTokens({ uid, grantTokens }) {
+  const [n, setN] = useState(10);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const add = async () => {
+    if (!n || n <= 0 || busy) return;
+    setBusy(true);
+    try { await grantTokens(uid, n); setMsg("Added " + n + " purchased tokens"); }
+    catch (e) { setMsg("Couldn't add tokens"); }
+    setBusy(false);
+  };
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div className="d-label" style={{ marginBottom: 6 }}>Credit purchased tokens (after they pay)</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input className="input" type="number" min="1" value={n} onChange={(e) => setN(parseInt(e.target.value) || 0)} style={{ width: 90 }} />
+        <button className="btn btn-sm" onClick={add} disabled={busy}>{busy ? "Adding…" : "Add tokens"}</button>
+      </div>
+      {msg && <p style={{ fontSize: 11.5, color: "var(--s-done)", margin: "8px 0 0" }}>{msg}</p>}
+    </div>
+  );
+}
+
+function RequestDetail({ r, onBack, updateRequest, grantTokens }) {
   const [note, setNote] = useState("");
   const change = async (status, text) =>
     updateRequest(r.id, { status, activity: [...r.activity, { ts: now(), actor: "Admin", kind: "status", text: text || ("Status → " + STATUS[status].label) }] });
@@ -506,6 +577,7 @@ function RequestDetail({ r, onBack, updateRequest }) {
           <span className={"pri pri-" + r.priority}>{r.priority}</span>
           <span className="type-chip">{r.type}</span>
           {r.page && <span className="type-chip">{r.page}</span>}
+          {r.cost != null && <span className="type-chip">−{r.cost} tokens</span>}
         </div>
         <div className="d-status-row">
           {(actions[r.status] || []).map(([label, fn], i) => (
@@ -531,6 +603,7 @@ function RequestDetail({ r, onBack, updateRequest }) {
           <div className="kv"><span>Email</span><span>{r.client.email}</span></div>
           <div className="kv"><span>Website</span><span>{r.client.website}</span></div>
           <div className="kv"><span>Filed</span><span>{fmt(r.createdAt)}</span></div>
+          <GrantTokens uid={r.client.uid} grantTokens={grantTokens} />
         </div>
         <div className="ai">
           <h4>◆ Draft with AI agent <span className="soon">soon</span></h4>
@@ -578,17 +651,53 @@ function App() {
   }, [user, isAdmin]);
 
   const createRequest = async (data) => {
+    const cost = costOf(data.type, data.priority);
+    const userRef = db.collection("users").doc(user.uid);
+    const reqRef = db.collection("requests").doc();
+    const period = ymNow();
+    const nm = (profile && profile.name) || user.email;
     const rec = {
       code: code(),
-      client: { uid: user.uid, name: (profile && profile.name) || user.email, email: user.email, website: (profile && profile.website) || "" },
-      ...data, status: "new", createdAt: now(), updatedAt: now(),
-      activity: [{ ts: now(), actor: (profile && profile.name) || user.email, kind: "created", text: "Request submitted" }],
+      client: { uid: user.uid, name: nm, email: user.email, website: (profile && profile.website) || "" },
+      ...data, cost, status: "new", createdAt: now(), updatedAt: now(),
+      activity: [{ ts: now(), actor: nm, kind: "created", text: "Request submitted · " + cost + " tokens" }],
     };
-    const ref = await db.collection("requests").add(rec);
-    return { id: ref.id, ...rec };
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(userRef);
+      const u = snap.exists ? snap.data() : {};
+      const free = (u.tokenPeriod !== period) ? MONTHLY_FREE : (u.freeTokens != null ? u.freeTokens : MONTHLY_FREE);
+      const purchased = u.purchasedTokens || 0;
+      if (free + purchased < cost) { const e = new Error("insufficient"); e.code = "insufficient"; throw e; }
+      const fromFree = Math.min(free, cost);            // spend expiring monthly tokens first
+      tx.set(userRef, {
+        freeTokens: free - fromFree,
+        purchasedTokens: purchased - (cost - fromFree),
+        tokenPeriod: period,
+        email: user.email,
+      }, { merge: true });
+      tx.set(reqRef, rec);
+    });
+    return { id: reqRef.id, ...rec };
   };
   const updateRequest = (id, patch) => db.collection("requests").doc(id).update({ ...patch, updatedAt: now() });
   const saveProfile = (p) => db.collection("users").doc(user.uid).set({ ...p, email: user.email }, { merge: true });
+  const grantTokens = (uid, n) => db.collection("users").doc(uid).set({ purchasedTokens: FieldValue.increment(n) }, { merge: true });
+
+  // Monthly grant: reset free tokens to MONTHLY_FREE when the period rolls over (purchased tokens untouched).
+  useEffect(() => {
+    if (!user || isAdmin || !profile) return;
+    if (profile.tokenPeriod !== ymNow()) {
+      db.collection("users").doc(user.uid)
+        .set({ freeTokens: MONTHLY_FREE, tokenPeriod: ymNow(), email: user.email }, { merge: true })
+        .catch((e) => console.error(e));
+    }
+  }, [user, isAdmin, profile]);
+
+  // Current balance for display (applies the reset in-memory even before it's persisted).
+  const period = ymNow();
+  const freeNow = profile ? ((profile.tokenPeriod !== period) ? MONTHLY_FREE : (profile.freeTokens != null ? profile.freeTokens : MONTHLY_FREE)) : 0;
+  const purchasedNow = profile ? (profile.purchasedTokens || 0) : 0;
+  const tokens = freeNow + purchasedNow;
 
   if (!authReady) return <Splash />;
   if (!user) return <Shell><AuthScreen /></Shell>;
@@ -596,9 +705,10 @@ function App() {
   return (
     <Shell user={user} isAdmin={isAdmin} onSignOut={() => auth.signOut()}>
       {isAdmin
-        ? <AdminView requests={requests} updateRequest={updateRequest} />
+        ? <AdminView requests={requests} updateRequest={updateRequest} grantTokens={grantTokens} />
         : (profile
-          ? <ClientView profile={{ ...profile, email: user.email }} requests={requests} createRequest={createRequest} updateRequest={updateRequest} />
+          ? <ClientView profile={{ ...profile, email: user.email }} requests={requests} createRequest={createRequest} updateRequest={updateRequest}
+              tokens={tokens} freeNow={freeNow} purchasedNow={purchasedNow} />
           : <ProfileSetup onSave={saveProfile} />)}
     </Shell>
   );
